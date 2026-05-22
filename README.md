@@ -22,7 +22,7 @@ This project provides:
 2. Item definitions for SPD body-part models
 3. A Python conversion script for clean AnimatedJava `1.10.0-beta.6` exports
 
-The goal is to make item-display based player-body parts render with the correct skin regions and animation workflow
+The goal is to make item-display based player-body parts render with the correct skin regions and animation behavior
 
 ---
 
@@ -71,7 +71,7 @@ If you use a different version, behavior may differ depending on shader or item-
 ## Workflow
 
 1. Export your project from AnimatedJava
-2. Use the Python script on the clean export
+2. Run the Python script on the clean export
 3. Apply the resource pack
 4. Spawn/use the resulting item displays
 
