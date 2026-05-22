@@ -1,20 +1,37 @@
-#version 150
+#version 330
 
 #moj_import <minecraft:fog.glsl>
 #moj_import <minecraft:dynamictransforms.glsl>
 
-#if defined(ALPHA_CUTOUT) && !defined(EMISSIVE) && !defined(NO_OVERLAY) && !defined(APPLY_TEXTURE_MATRIX)
+#if defined(ALPHA_CUTOUT) && !defined(EMISSIVE) && !defined(NO_OVERLAY) && !defined(APPLY_TEXTURE_MATRIX) && !defined(DISSOLVE)
 #define MAYBE_PLAYERDISP 1
 #endif
 
 uniform sampler2D Sampler0;
 
+#ifdef DISSOLVE
+uniform sampler2D DissolveMaskSampler;
+#endif
+
 in float sphericalVertexDistance;
 in float cylindricalVertexDistance;
+#ifdef PER_FACE_LIGHTING
+in vec4 vertexPerFaceColorBack;
+in vec4 vertexPerFaceColorFront;
+#else
 in vec4 vertexColor;
+#endif
+
+#ifndef EMISSIVE
 in vec4 lightMapColor;
+#endif
+
+#ifndef NO_OVERLAY
 in vec4 overlayColor;
+#endif
+
 in vec2 texCoord0;
+
 #ifdef MAYBE_PLAYERDISP
 in vec2 texCoord1;
 in float part;
@@ -23,11 +40,12 @@ in float part;
 #define FADEBIAS 8.0
 #define MINALPHA 0.25
 
-const mat4 bayer4 = mat4( 0.0 / 16.0,  8.0 / 16.0,  2.0 / 16.0, 10.0 / 16.0,
-                         12.0 / 16.0,  4.0 / 16.0, 14.0 / 16.0,  6.0 / 16.0,
-                          3.0 / 16.0, 11.0 / 16.0,  1.0 / 16.0,  9.0 / 16.0,
-                         15.0 / 16.0,  7.0 / 16.0, 13.0 / 16.0,  5.0 / 16.0);
-                         
+const mat4 bayer4 = mat4(
+    0.0 / 16.0,  8.0 / 16.0,  2.0 / 16.0, 10.0 / 16.0,
+   12.0 / 16.0,  4.0 / 16.0, 14.0 / 16.0,  6.0 / 16.0,
+    3.0 / 16.0, 11.0 / 16.0,  1.0 / 16.0,  9.0 / 16.0,
+   15.0 / 16.0,  7.0 / 16.0, 13.0 / 16.0,  5.0 / 16.0
+);
 #endif
 
 out vec4 fragColor;
@@ -39,28 +57,55 @@ void main() {
         discard;
     }
 #endif
-    color *= vertexColor * ColorModulator;
+
+#ifdef PER_FACE_LIGHTING
+    vec4 faceVertexColor = gl_FrontFacing ? vertexPerFaceColorFront : vertexPerFaceColorBack;
+#else
+    vec4 faceVertexColor = vertexColor;
+#endif
+
+#ifdef DISSOLVE
+    if (faceVertexColor.a < texture(DissolveMaskSampler, texCoord0).a) {
+        discard;
+    }
+    faceVertexColor.a = 1.0;
+#endif
+
+    color *= faceVertexColor * ColorModulator;
 #ifndef NO_OVERLAY
     color.rgb = mix(overlayColor.rgb, color.rgb, overlayColor.a);
 #endif
 #ifndef EMISSIVE
     color *= lightMapColor;
 #endif
-    fragColor = apply_fog(color, sphericalVertexDistance, cylindricalVertexDistance, FogEnvironmentalStart, FogEnvironmentalEnd, FogRenderDistanceStart, FogRenderDistanceEnd, FogColor);
+
+    fragColor = apply_fog(
+        color,
+        sphericalVertexDistance,
+        cylindricalVertexDistance,
+        FogEnvironmentalStart,
+        FogEnvironmentalEnd,
+        FogRenderDistanceStart,
+        FogRenderDistanceEnd,
+        FogColor
+    );
 
 #ifdef MAYBE_PLAYERDISP
-    if (part > 1.0 - 10e-6 && fragColor.a < 1.0) {
+    if (part > 1.0 - 1e-5 && fragColor.a < 1.0) {
         fragColor.a = max(fragColor.a, MINALPHA);
 
         vec3 underCol = texture(Sampler0, texCoord1).rgb;
         vec3 trueMix = mix(underCol, fragColor.rgb, fragColor.a);
-        float fade = mix(fragColor.a, 1.0, clamp((cylindricalVertexDistance - FADEBIAS) / (FADERANGE - FADEBIAS), 0.0, 1.0));
+        float fade = mix(
+            fragColor.a,
+            1.0,
+            clamp((cylindricalVertexDistance - FADEBIAS) / (FADERANGE - FADEBIAS), 0.0, 1.0)
+        );
 
-        fragColor = vec4((trueMix - (1 - fade) * underCol) / fade,  fade);
+        fragColor = vec4((trueMix - (1.0 - fade) * underCol) / fade, fade);
         if (fragColor.a < bayer4[int(gl_FragCoord.x) % 4][int(gl_FragCoord.y) % 4] + (0.5 / 16.0)) {
             discard;
-        }
-        else {
+        } else {
             fragColor.a = 1.0;
         }
     }
