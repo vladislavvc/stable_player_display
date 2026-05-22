@@ -47,7 +47,7 @@ def parse_cli_arguments():
 
 
 def print_usage():
-    print("Usage: aj-convert-clean.py [project] [optional:flags]")
+    print("Usage: aj-convert.py [project] [optional:flags]")
     print("  -pn=[playerName]   Player skin to use (default: none -> air)")
     print("  -split             Enable split model mode")
 
@@ -73,6 +73,7 @@ def add_y_offset(transformation, y_offset):
 
 def modify_summon_file(filepath, project, offsets, player_name):
     if not os.path.isfile(filepath):
+        print(f"  [summon] No summon.mcfunction at {filepath}")
         return
 
     with open(filepath, "r", encoding="utf-8") as f:
@@ -108,7 +109,8 @@ def modify_summon_file(filepath, project, offsets, player_name):
             try:
                 nbt_root = nbtlib.parse_nbt(nbt_data)
                 suffix = ""
-            except Exception:
+            except Exception as e:
+                print(f"  [summon] NBT parse failed: {e}")
                 continue
 
         if "Passengers" not in nbt_root or len(nbt_root["Passengers"]) < 1:
@@ -122,7 +124,11 @@ def modify_summon_file(filepath, project, offsets, player_name):
 
         with open(filepath, "w", encoding="utf-8") as f:
             f.writelines(raw_lines)
+
+        print(f"Updated summon: {filepath}")
         return
+
+    print(f"  [summon] No Passengers block found in {filepath}")
 
 
 def get_current_y(transform):
@@ -194,6 +200,12 @@ def update_pose_and_frame_files(base_path, offsets):
                     candidates.append(fpath)
                     break
 
+    if not candidates:
+        print(f"  [pose/frame] No macro-driven files found in {base_path}")
+        return
+
+    patched = 0
+
     for path in candidates:
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -204,8 +216,11 @@ def update_pose_and_frame_files(base_path, offsets):
             if new_lines != lines:
                 with open(path, "w", encoding="utf-8") as f:
                     f.writelines(new_lines)
-        except Exception:
-            pass
+                patched += 1
+        except Exception as e:
+            print(f"Error processing {path}: {e}")
+
+    print(f"  [pose/frame] Patched {patched} of {len(candidates)} files in {base_path}")
 
 
 def modify_macro_line(line, offsets):
@@ -231,7 +246,8 @@ def patch_macro_nbt(line, y_offset, macro):
     except Exception:
         try:
             nbt_root = nbtlib.parse_nbt(tail.rstrip())
-        except Exception:
+        except Exception as e:
+            print(f"  [pose/frame] NBT parse failed: {e}")
             return line
 
     if "transformation" not in nbt_root:
@@ -239,7 +255,8 @@ def patch_macro_nbt(line, y_offset, macro):
 
     try:
         add_y_offset(nbt_root["transformation"], y_offset)
-    except Exception:
+    except Exception as e:
+        print(f"  [pose/frame] Patch failed: {e}")
         return line
 
     return head + nbtlib.serialize_tag(nbt_root, compact=True) + "\n"
@@ -248,11 +265,17 @@ def patch_macro_nbt(line, y_offset, macro):
 def main():
     project, player_name, offsets = parse_cli_arguments()
 
+    print(f"Starting aj-convert for project: {project}")
+    print(f"  Player name : {player_name or '(none)'}")
+    print(f"  Mode        : {'split' if offsets is SPLIT_OFFSETS else 'default'}")
+    print()
+
     base = None
     for namespace in ("aj", "animated_java"):
         candidate = os.path.join(".", "data", namespace, "function", project)
         if os.path.isdir(candidate):
             base = candidate
+            print(f"Detected namespace: {namespace}")
             break
 
     if base is None:
@@ -261,6 +284,8 @@ def main():
 
     modify_summon_file(os.path.join(base, "summon.mcfunction"), project, offsets, player_name)
     update_pose_and_frame_files(base, offsets)
+
+    print("\nDone!")
 
 
 if __name__ == "__main__":
