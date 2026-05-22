@@ -100,3 +100,9 @@ If you use a different version, behavior may differ depending on shader or item-
 
 ### Script
 - `aj-convert.py`
+
+Overall, everything works more or less the same way as shown in the original guide, just adapted for this newer setup
+
+## Credits
+- `bradleyq`: Original creator
+- `Resonance#3633`: Providing custom models and base templates
