@@ -33,12 +33,48 @@ in vec4 overlayColor;
 in vec2 texCoord0;
 
 #ifdef MAYBE_PLAYERDISP
-in vec2 texCoord1;
-in float part;
+flat in int playerDispPart;
+flat in int playerDispSlim;
 
+#define SPLITMODEL 0
+#define SKINRES 64.0
 #define FADERANGE 12.0
 #define FADEBIAS 8.0
 #define MINALPHA 0.25
+
+const vec4[] subuvs = vec4[](
+    vec4(4.0,  0.0,  8.0,  4.0),
+    vec4(8.0,  0.0, 12.0,  4.0),
+    vec4(0.0,  4.0,  4.0, 16.0),
+    vec4(4.0,  4.0,  8.0, 16.0),
+    vec4(8.0,  4.0, 12.0, 16.0),
+    vec4(12.0, 4.0, 16.0, 16.0),
+    vec4(4.0,  0.0,  7.0,  4.0),
+    vec4(7.0,  0.0, 10.0,  4.0),
+    vec4(0.0,  4.0,  4.0, 16.0),
+    vec4(4.0,  4.0,  7.0, 16.0),
+    vec4(7.0,  4.0, 11.0, 16.0),
+    vec4(11.0, 4.0, 14.0, 16.0),
+    vec4(4.0,  0.0, 12.0,  4.0),
+    vec4(12.0, 0.0, 20.0,  4.0),
+    vec4(0.0,  4.0,  4.0, 16.0),
+    vec4(4.0,  4.0, 12.0, 16.0),
+    vec4(12.0, 4.0, 16.0, 16.0),
+    vec4(16.0, 4.0, 24.0, 16.0)
+);
+
+const vec2[] origins = vec2[](
+    vec2(40.0, 16.0),
+    vec2(40.0, 32.0),
+    vec2(32.0, 48.0),
+    vec2(48.0, 48.0),
+    vec2(16.0, 16.0),
+    vec2(16.0, 32.0),
+    vec2(0.0,  16.0),
+    vec2(0.0,  32.0),
+    vec2(16.0, 48.0),
+    vec2(0.0,  48.0)
+);
 
 const mat4 bayer4 = mat4(
     0.0 / 16.0,  8.0 / 16.0,  2.0 / 16.0, 10.0 / 16.0,
@@ -46,12 +82,71 @@ const mat4 bayer4 = mat4(
     3.0 / 16.0, 11.0 / 16.0,  1.0 / 16.0,  9.0 / 16.0,
    15.0 / 16.0,  7.0 / 16.0, 13.0 / 16.0,  5.0 / 16.0
 );
+
+void remapPlayerDispUV(vec2 sourceUV, int partIndex, bool slim, out vec2 mappedUV, out vec2 underUV) {
+    vec2 sourcePixel = sourceUV * SKINRES;
+    int outerLayer = sourcePixel.x >= 32.0 ? 1 : 0;
+
+    if (outerLayer == 1) {
+        sourcePixel.x -= 32.0;
+    }
+
+    int faceId;
+    vec2 sourceOrigin;
+
+    if (sourcePixel.y < 8.0) {
+        if (sourcePixel.x < 16.0) {
+            faceId = 0;
+            sourceOrigin = vec2(8.0, 0.0);
+        } else {
+            faceId = 1;
+            sourceOrigin = vec2(16.0, 0.0);
+        }
+    } else {
+        int sideFace = int(clamp(floor(sourcePixel.x / 8.0), 0.0, 3.0));
+        faceId = sideFace + 2;
+        sourceOrigin = vec2(float(sideFace) * 8.0, 8.0);
+    }
+
+    vec2 faceUV = clamp((sourcePixel - sourceOrigin) / 8.0, 0.0, 1.0);
+    int partIdMod = partIndex % 5;
+    int subuvIndex = faceId;
+
+    if (slim && (partIdMod == 0 || partIdMod == 1)) {
+        subuvIndex += 6;
+    } else if (partIdMod == 2) {
+        subuvIndex += 12;
+    }
+
+    vec4 subuv = subuvs[subuvIndex];
+
+#if SPLITMODEL == 1
+    if (faceId >= 2) {
+        subuv.w -= 6.0;
+        if (partIndex >= 5) {
+            subuv.yw += 6.0;
+        }
+    }
+#endif
+
+    vec2 offset = mix(subuv.xy, subuv.zw, faceUV);
+    mappedUV = (origins[2 * partIdMod + outerLayer] + offset) / SKINRES;
+    underUV = (origins[2 * partIdMod] + offset) / SKINRES;
+}
 #endif
 
 out vec4 fragColor;
 
 void main() {
-    vec4 color = texture(Sampler0, texCoord0);
+    vec2 sampleUV = texCoord0;
+#ifdef MAYBE_PLAYERDISP
+    vec2 underUV = texCoord0;
+    if (playerDispPart > 0) {
+        remapPlayerDispUV(texCoord0, playerDispPart - 1, playerDispSlim != 0, sampleUV, underUV);
+    }
+#endif
+
+    vec4 color = texture(Sampler0, sampleUV);
 #ifdef ALPHA_CUTOUT
     if (color.a < ALPHA_CUTOUT) {
         discard;
@@ -65,7 +160,7 @@ void main() {
 #endif
 
 #ifdef DISSOLVE
-    if (faceVertexColor.a < texture(DissolveMaskSampler, texCoord0).a) {
+    if (faceVertexColor.a < texture(DissolveMaskSampler, sampleUV).a) {
         discard;
     }
     faceVertexColor.a = 1.0;
@@ -91,10 +186,10 @@ void main() {
     );
 
 #ifdef MAYBE_PLAYERDISP
-    if (part > 1.0 - 1e-5 && fragColor.a < 1.0) {
+    if (playerDispPart > 0 && fragColor.a < 1.0) {
         fragColor.a = max(fragColor.a, MINALPHA);
 
-        vec3 underCol = texture(Sampler0, texCoord1).rgb;
+        vec3 underCol = texture(Sampler0, underUV).rgb;
         vec3 trueMix = mix(underCol, fragColor.rgb, fragColor.a);
         float fade = mix(
             fragColor.a,
