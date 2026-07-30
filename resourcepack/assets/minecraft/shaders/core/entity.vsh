@@ -1,6 +1,8 @@
 #version 330
 
+#if defined(PER_FACE_LIGHTING) || !defined(NO_CARDINAL_LIGHTING)
 #moj_import <minecraft:light.glsl>
+#endif
 #moj_import <minecraft:fog.glsl>
 #moj_import <minecraft:dynamictransforms.glsl>
 #moj_import <minecraft:projection.glsl>
@@ -9,8 +11,6 @@
 #if defined(ALPHA_CUTOUT) && !defined(EMISSIVE) && !defined(NO_OVERLAY) && !defined(APPLY_TEXTURE_MATRIX) && !defined(DISSOLVE)
 #define MAYBE_PLAYERDISP 1
 #endif
-
-#define SPLITMODEL 0
 
 in vec3 Position;
 in vec4 Color;
@@ -50,52 +50,15 @@ out vec4 overlayColor;
 out vec2 texCoord0;
 
 #ifdef MAYBE_PLAYERDISP
-out vec2 texCoord1;
-out float part;
+flat out int playerDispPart;
+flat out int playerDispSlim;
 
 #define SPACING 1024.0
 #define MAXRANGE (0.5 * SPACING)
 #define SKINRES 64
-#define FACERES 8
 
 #define SLIMCHECK0 vec2(54.0 / float(SKINRES), 20.0 / float(SKINRES))
 #define SLIMCHECK1 vec2(55.0 / float(SKINRES), 20.0 / float(SKINRES))
-
-const vec4[] subuvs = vec4[](
-    vec4(4.0,  0.0,  8.0,  4.0),
-    vec4(8.0,  0.0, 12.0,  4.0),
-    vec4(0.0,  4.0,  4.0, 16.0),
-    vec4(4.0,  4.0,  8.0, 16.0),
-    vec4(8.0,  4.0, 12.0, 16.0),
-    vec4(12.0, 4.0, 16.0, 16.0),
-    vec4(4.0,  0.0,  7.0,  4.0),
-    vec4(7.0,  0.0, 10.0,  4.0),
-    vec4(0.0,  4.0,  4.0, 16.0),
-    vec4(4.0,  4.0,  7.0, 16.0),
-    vec4(7.0,  4.0, 11.0, 16.0),
-    vec4(11.0, 4.0, 14.0, 16.0),
-    vec4(4.0,  0.0, 12.0,  4.0),
-    vec4(12.0, 0.0, 20.0,  4.0),
-    vec4(0.0,  4.0,  4.0, 16.0),
-    vec4(4.0,  4.0, 12.0, 16.0),
-    vec4(12.0, 4.0, 16.0, 16.0),
-    vec4(16.0, 4.0, 24.0, 16.0)
-);
-
-const vec2[] origins = vec2[](
-    vec2(40.0, 16.0),
-    vec2(40.0, 32.0),
-    vec2(32.0, 48.0),
-    vec2(48.0, 48.0),
-    vec2(16.0, 16.0),
-    vec2(16.0, 32.0),
-    vec2(0.0,  16.0),
-    vec2(0.0,  32.0),
-    vec2(16.0, 48.0),
-    vec2(0.0,  48.0)
-);
-
-const int[] faceremap = int[](0, 0, 1, 1, 2, 3, 4, 5);
 #endif
 
 void main() {
@@ -122,93 +85,27 @@ void main() {
 #endif
 
 #ifdef MAYBE_PLAYERDISP
-    ivec2 dim = textureSize(Sampler0, 0);
-    part = 0.0;
-    texCoord1 = vec2(0.0);
+    playerDispPart = 0;
+    playerDispSlim = 0;
 
+    ivec2 dim = textureSize(Sampler0, 0);
     if (abs(ProjMat[2][3]) > 1e-5 && dim.x == SKINRES && dim.y == SKINRES && FogRenderDistanceEnd > FogRenderDistanceStart) {
         int partId = -int((Position.y - MAXRANGE) / SPACING);
-        part = float(partId);
 
         if (partId != 0) {
-            partId -= 1;
             vec4 samp1 = texture(Sampler0, SLIMCHECK0);
             vec4 samp2 = texture(Sampler0, SLIMCHECK1);
             bool slim = samp1.a == 0.0 || (((samp1.r + samp1.g + samp1.b) == 0.0) && ((samp2.r + samp2.g + samp2.b) == 0.0) && samp1.a == 1.0 && samp2.a == 1.0);
-            int partIdMod = partId % 5;
-            int outerLayer = (gl_VertexID / 24) % 2;
-            int vertexId = gl_VertexID % 4;
-            int faceId = (gl_VertexID % 24) / 4;
-            ivec2 faceIdTmp = ivec2(round(UV0 * SKINRES));
 
-            vec2 UVout = origins[2 * partIdMod + outerLayer];
-            vec2 UVout2 = origins[2 * partIdMod];
-
-            if ((faceId != 1 && vertexId >= 2) || (faceId == 1 && vertexId <= 1)) {
-                faceIdTmp.y -= FACERES;
-            }
-            if (vertexId == 0 || vertexId == 3) {
-                faceIdTmp.x -= FACERES;
-            }
-
-            faceIdTmp /= FACERES;
-            faceId = (faceIdTmp.x % 4) + 4 * faceIdTmp.y;
-            faceId = faceremap[faceId];
-            int subuvIndex = faceId;
-
-            if (slim && (partIdMod == 0 || partIdMod == 1)) {
-                subuvIndex += 6;
-            } else if (partIdMod == 2) {
-                subuvIndex += 12;
-            }
-
-            vec4 subuv = subuvs[subuvIndex];
-            vec2 offset = vec2(0.0);
-
-#if SPLITMODEL == 1
-            if (faceId >= 2) {
-                subuv.w -= 6.0;
-                if (partId >= 5) {
-                    subuv.yw += 6.0;
-                }
-            }
-#endif
-
-            if (faceId == 1) {
-                if (vertexId == 0) {
-                    offset += subuv.zw;
-                } else if (vertexId == 1) {
-                    offset += subuv.xw;
-                } else if (vertexId == 2) {
-                    offset += subuv.xy;
-                } else {
-                    offset += subuv.zy;
-                }
-            } else {
-                if (vertexId == 0) {
-                    offset += subuv.zy;
-                } else if (vertexId == 1) {
-                    offset += subuv.xy;
-                } else if (vertexId == 2) {
-                    offset += subuv.xw;
-                } else {
-                    offset += subuv.zw;
-                }
-            }
-
-            UVout += offset;
-            UVout2 += offset;
-            UVout /= float(SKINRES);
-            UVout2 /= float(SKINRES);
+            playerDispPart = partId;
+            playerDispSlim = slim ? 1 : 0;
 
             vec3 wpos = Position;
-            wpos.y += SPACING * (partId + 1);
+            wpos.y += SPACING * partId;
             gl_Position = ProjMat * ModelViewMat * vec4(wpos, 1.0);
 
             sphericalVertexDistance = fog_spherical_distance(wpos);
             cylindricalVertexDistance = fog_cylindrical_distance(wpos);
-            texCoord0 = UVout;
-            texCoord1 = UVout2;
             return;
         }
     }
